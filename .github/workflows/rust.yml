@@ -1,4 +1,4 @@
-name: Beep Boop
+name: wasm page - build and deploy
 
 on:
   push:
@@ -16,26 +16,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - name: Install WASM
-      run: |
-        rustup target add wasm32-unknown-unknown
-    - name: Tools - wasm-gc
+    - name: wasm
+      run: rustup target add wasm32-unknown-unknown
+    - name: gc
       uses: baptiste0928/cargo-install@v1
       with:
         crate: wasm-gc
-    - name: Tools - wasm-bindgen-cli
+    - name: bindgen
       uses: baptiste0928/cargo-install@v1
       with:
         crate: wasm-bindgen-cli
-    - name: Build
+    - name: build
+      run: cargo build --target wasm32-unknown-unknown --release
+    - name: strip
+      run: wasm-bindgen --target web --no-typescript --out-dir target/wasm32-unknown-unknown/release/ target/wasm32-unknown-unknown/release/wasm_sample.wasm
+    - name: strip
+      run: wasm-gc target/wasm32-unknown-unknown/release/wasm_sample_bg.wasm
+    - name: collect
       run: |
-        cargo build --target wasm32-unknown-unknown --release
-        wasm-bindgen --target web --no-typescript --out-dir target/wasm32-unknown-unknown/release/ target/wasm32-unknown-unknown/release/wasm_sample.wasm
-        wasm-gc target/wasm32-unknown-unknown/release/wasm_sample_bg.wasm
         cp target/wasm32-unknown-unknown/release/wasm_sample_bg.wasm www/wasm_sample_bg.wasm
         cp target/wasm32-unknown-unknown/release/wasm_sample.js www/wasm_sample.js
         mv www/wasm_sample.html www/index.html
-    - name: Deploy
+    - name: yeet
       uses: JamesIves/github-pages-deploy-action@v4
       with:
         folder: www
