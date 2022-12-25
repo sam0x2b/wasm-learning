@@ -16,18 +16,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - name: Install
+    - name: Install WASM
       run: |
         rustup target add wasm32-unknown-unknown
-        cargo install wasm-gc
-        cargo install wasm-bindgen-cli
+    - name: Tools - wasm-gc
+      uses: baptiste0928/cargo-install@v1
+      with:
+        crate: wasm-gc
+    - name: Tools - wasm-bindgen-cli
+      uses: baptiste0928/cargo-install@v1
+      with:
+        crate: wasm-bindgen-cli
     - name: Build
       run: |
         cargo build --target wasm32-unknown-unknown --release
         wasm-bindgen --target web --no-typescript --out-dir target/wasm32-unknown-unknown/release/ target/wasm32-unknown-unknown/release/wasm_sample.wasm
         wasm-gc target/wasm32-unknown-unknown/release/wasm_sample_bg.wasm
         cp target/wasm32-unknown-unknown/release/wasm_sample_bg.wasm www/wasm_sample_bg.wasm
-        cp target/wasm32-unknown-unknown/release/wasm_sample.js www/asm_sample.js
+        cp target/wasm32-unknown-unknown/release/wasm_sample.js www/wasm_sample.js
         mv www/wasm_sample.html www/index.html
     - name: Deploy
       uses: JamesIves/github-pages-deploy-action@v4
