@@ -28,11 +28,11 @@ jobs:
         crate: wasm-bindgen-cli
     - name: build
       run: cargo build --target wasm32-unknown-unknown --release
-    - name: strip
+    - name: gen
       run: wasm-bindgen --target web --no-typescript --out-dir target/wasm32-unknown-unknown/release/ target/wasm32-unknown-unknown/release/wasm_sample.wasm
     - name: strip
       run: wasm-gc target/wasm32-unknown-unknown/release/wasm_sample_bg.wasm
-    - name: collect
+    - name: grab
       run: |
         cp target/wasm32-unknown-unknown/release/wasm_sample_bg.wasm www/wasm_sample_bg.wasm
         cp target/wasm32-unknown-unknown/release/wasm_sample.js www/wasm_sample.js
