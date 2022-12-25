@@ -1,33 +1,38 @@
-name: Rust
+name: Beep Boop
 
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-    runs-on: windows-2019
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - name: Prepare
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: wasm32-unknown-unknown
+        override: true
+    - name: Install WASM tools
       run: |
-        rustup target add wasm32-unknown-unknown
         cargo install wasm-gc
         cargo install wasm-bindgen-cli
     - name: Build
       run: |
-        cargo build --verbose --target wasm32-unknown-unknown --release
-        wasm-bindgen --target web --no-typescript --out-dir target/wasm32-unknown-unknown/release/ target/wasm32-unknown-unknown/release/wasm_sample.wasm
-        wasm-gc target/wasm32-unknown-unknown/release/wasm_sample_bg.wasm
-    - name: collect
-      run: |
-        cp target/wasm32-unknown-unknown/release/wasm_sample_bg.wasm www
-        cp target/wasm32-unknown-unknown/release/wasm_sample.js www
+        cargo build --target wasm32-unknown-unknown --release
+        wasm-bindgen --target web --no-typescript --out-dir target\wasm32-unknown-unknown\release\ target\wasm32-unknown-unknown\release\wasm_sample.wasm
+        wasm-gc target\wasm32-unknown-unknown\release\wasm_sample_bg.wasm
+        cp target\wasm32-unknown-unknown\release\wasm_sample_bg.wasm www
+        cp target\wasm32-unknown-unknown\release\wasm_sample.js www
         ren .\www\wasm_sample.html index.html
     - name: Deploy
       uses: JamesIves/github-pages-deploy-action@v4
