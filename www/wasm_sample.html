@@ -1,0 +1,21 @@
+<html lang="en-US">
+
+<head>
+  <title>wasm lernding</title>
+  <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+</head>
+
+<body>
+  <!-- because ES6 -->
+  <script type="module">
+    import { start, default as init } from './wasm_sample.js';
+    async function run() {
+      await init('./wasm_sample_bg.wasm');
+      window.start = start;
+    }
+    run();
+  </script>
+  <canvas id="canvas" height="150" width="150"></canvas>
+</body>
+
+</html>
