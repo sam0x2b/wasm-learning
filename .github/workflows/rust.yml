@@ -11,9 +11,7 @@ env:
 
 jobs:
   build:
-
     runs-on: windows-2019
-
     steps:
     - uses: actions/checkout@v3
     - name: Prepare
@@ -25,6 +23,13 @@ jobs:
       run: |
         cargo build --verbose --target wasm32-unknown-unknown --release
         wasm-bindgen --target web --no-typescript --out-dir target/wasm32-unknown-unknown/release/ target/wasm32-unknown-unknown/release/wasm_sample.wasm
-        wasm-gc target/wasm32-unknown-unknown/release/wasm_sample.wasm
-    - name: Post
-      run: tree -f
+        wasm-gc target/wasm32-unknown-unknown/release/wasm_sample_bg.wasm
+    - name: collect
+      run: |
+        cp target/wasm32-unknown-unknown/release/wasm_sample_bg.wasm www
+        cp target/wasm32-unknown-unknown/release/wasm_sample.js www
+        ren .\www\wasm_sample.html index.html
+    - name: Deploy
+      uses: JamesIves/github-pages-deploy-action@v4
+      with:
+        folder: www
