@@ -22,30 +22,12 @@ pub fn start() -> Result<(), JsValue> {
     let vert_shader = compile_shader(
         &context,
         WebGl2RenderingContext::VERTEX_SHADER,
-        r#"#version 300 es
-        precision mediump float;
-        
-        in vec3 vertexPosition;
-        out vec3 pos;
-        void main() {
-            gl_Position = vec4(vertexPosition, 1.);
-            pos = vertexPosition;
-        }
-    "#,
+        include_str!("./shader.vert"),
     )?;
     let frag_shader = compile_shader(
         &context,
         WebGl2RenderingContext::FRAGMENT_SHADER,
-        r#"#version 300 es
-        precision mediump float;
-
-        in vec3 pos;
-        out vec4 fragColor;
-
-        void main() {
-            fragColor = vec4(pos * 0.5 + 0.5, 1.0);
-        }
-    "#,
+        include_str!("./shader.frag"),
     )?;
     let program = link_program(&context, &vert_shader, &frag_shader)?;
     context.use_program(Some(&program));
