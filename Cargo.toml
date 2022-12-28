@@ -17,6 +17,7 @@ features = [
   'Document',
   'Element',
   'HtmlCanvasElement',
+  'HtmlImageElement',
   'WebGlBuffer',
   'WebGl2RenderingContext',
   'WebGlProgram',
