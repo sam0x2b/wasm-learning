@@ -1,4 +1,5 @@
-@echo off
+del target\wasm32-unknown-unknown\debug\wasm_sample.js
+del target\wasm32-unknown-unknown\debug\wasm_sample_bg.wasm
 
 cargo build --target wasm32-unknown-unknown
 cd target/wasm32-unknown-unknown/debug
