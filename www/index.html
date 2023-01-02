@@ -7,9 +7,10 @@
   <script type="module">
     import { start, default as init } from './wasm_sample.js';
 
+
     async function run() {
-        await init('./wasm_sample_bg.wasm');
-        window.start = start;
+          await init('./wasm_sample_bg.wasm');
+          window.start = start;
     }
 
     // (for the sake of not handling async logic on the rust side of things)

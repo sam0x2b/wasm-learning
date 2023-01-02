@@ -1,6 +1,3 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::WebGl2RenderingContext as GL;
@@ -17,20 +14,17 @@ pub fn start() -> Result<(), JsValue> {
 
     // DOM
     let document = web_sys::window().unwrap().document().unwrap();
-    let canvas = document.get_element_by_id("canvas").unwrap();
-    let canvas: web_sys::HtmlCanvasElement = canvas.dyn_into::<web_sys::HtmlCanvasElement>()?;
-
+    let canvas = document
+        .get_element_by_id("canvas")
+        .unwrap()
+        .dyn_into::<web_sys::HtmlCanvasElement>()?;
     let gl = canvas.get_context("webgl2")?.unwrap().dyn_into::<GL>()?;
     let gl = Rc::new(gl);
 
     // Shader Program
-    let vert_shader = compile_shader(gl.clone(), GL::VERTEX_SHADER, include_str!("./shader.vert"))?;
-    let frag_shader = compile_shader(
-        gl.clone(),
-        GL::FRAGMENT_SHADER,
-        include_str!("./shader.frag"),
-    )?;
-    let program = link_program(gl.clone(), &vert_shader, &frag_shader)?;
+    let vert_shader = compile_shader(&gl, GL::VERTEX_SHADER, include_str!("./shader.vert"))?;
+    let frag_shader = compile_shader(&gl, GL::FRAGMENT_SHADER, include_str!("./shader.frag"))?;
+    let program = link_program(&gl, &vert_shader, &frag_shader)?;
     gl.use_program(Some(&program));
     let program = Rc::new(program);
 
@@ -89,7 +83,7 @@ pub fn start() -> Result<(), JsValue> {
         gl.bind_buffer(GL::ARRAY_BUFFER, Some(&buffer));
         unsafe {
             // spooky Float32Array::view memory danger
-            let array = js_sys::Float32Array::view(&positions);
+            let array = js_sys::Float32Array::view(&uvs);
             gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &array, GL::STATIC_DRAW);
         }
         gl.vertex_attrib_pointer_with_i32(a_position, POSITION_SIZE as i32, GL::FLOAT, false, 0, 0);
@@ -125,7 +119,7 @@ pub fn start() -> Result<(), JsValue> {
     Ok(())
 }
 
-pub fn compile_shader(gl: Rc<GL>, shader_type: u32, source: &str) -> Result<WebGlShader, String> {
+fn compile_shader(gl: &GL, shader_type: u32, source: &str) -> Result<WebGlShader, String> {
     let shader = gl
         .create_shader(shader_type)
         .ok_or_else(|| String::from("Unable to create shader object"))?;
@@ -145,8 +139,8 @@ pub fn compile_shader(gl: Rc<GL>, shader_type: u32, source: &str) -> Result<WebG
     }
 }
 
-pub fn link_program(
-    gl: Rc<GL>,
+fn link_program(
+    gl: &GL,
     vert_shader: &WebGlShader,
     frag_shader: &WebGlShader,
 ) -> Result<WebGlProgram, String> {
