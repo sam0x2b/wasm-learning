@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::WebGl2RenderingContext as GL;
@@ -83,7 +86,7 @@ pub fn start() -> Result<(), JsValue> {
         gl.bind_buffer(GL::ARRAY_BUFFER, Some(&buffer));
         unsafe {
             // spooky Float32Array::view memory danger
-            let array = js_sys::Float32Array::view(&uvs);
+            let array = js_sys::Float32Array::view(&positions);
             gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &array, GL::STATIC_DRAW);
         }
         gl.vertex_attrib_pointer_with_i32(a_position, POSITION_SIZE as i32, GL::FLOAT, false, 0, 0);
