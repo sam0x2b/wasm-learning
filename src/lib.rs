@@ -1,6 +1,3 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::WebGl2RenderingContext as GL;
@@ -22,43 +19,41 @@ pub fn start() -> Result<(), JsValue> {
         .unwrap()
         .dyn_into::<web_sys::HtmlCanvasElement>()?;
     let gl = canvas.get_context("webgl2")?.unwrap().dyn_into::<GL>()?;
-    let gl = Rc::new(gl);
+    let gl = gl;
 
     // Shader Program
     let vert_shader = compile_shader(&gl, GL::VERTEX_SHADER, include_str!("./shader.vert"))?;
     let frag_shader = compile_shader(&gl, GL::FRAGMENT_SHADER, include_str!("./shader.frag"))?;
     let program = link_program(&gl, &vert_shader, &frag_shader)?;
     gl.use_program(Some(&program));
-    let program = Rc::new(program);
 
     // Texture Setup
     // (referring to https://webgl2fundamentals.org/webgl/lessons/webgl-image-processing.html)
-    // let image = document
-    //     .get_element_by_id("texture")
-    //     .unwrap()
-    //     .dyn_into::<web_sys::HtmlImageElement>()?;
+    let image = document
+        .get_element_by_id("texture")
+        .unwrap()
+        .dyn_into::<web_sys::HtmlImageElement>()?;
 
     // (create and bind texture)
-    texture_from_image(gl.clone(), "./test.webp", program.clone());
-    // let texture = gl.create_texture().unwrap();
-    // gl.active_texture(GL::TEXTURE0); // fixme when we get to actually making stuff, we need to be sure we are using GL::TEXTUREx thing (coz compatibility)
-    // gl.bind_texture(GL::TEXTURE_2D, Some(&texture));
+    let texture = gl.create_texture().unwrap();
+    gl.active_texture(GL::TEXTURE0); // fixme when we get to actually making stuff, we need to be sure we are using GL::TEXTUREx thing (coz compatibility)
+    gl.bind_texture(GL::TEXTURE_2D, Some(&texture));
 
-    // // (image uniform location)
-    // let u_texture = gl.get_uniform_location(&program, "u_texture").unwrap();
-    // gl.uniform1i(Some(&u_texture), 0); // tell the shader to look at texture unit 0
+    // (image uniform location)
+    let u_texture = gl.get_uniform_location(&program, "u_texture").unwrap();
+    gl.uniform1i(Some(&u_texture), 0); // tell the shader to look at texture unit 0
 
-    // gl.pixel_storei(GL::UNPACK_FLIP_Y_WEBGL, 1);
-    // gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, GL::NEAREST as i32);
-    // gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MAG_FILTER, GL::NEAREST as i32);
-    // gl.tex_image_2d_with_u32_and_u32_and_html_image_element(
-    //     GL::TEXTURE_2D,
-    //     0,
-    //     GL::RGBA as i32,
-    //     GL::RGBA,
-    //     GL::UNSIGNED_BYTE,
-    //     &image,
-    // ).expect("Not a valid texture");
+    gl.pixel_storei(GL::UNPACK_FLIP_Y_WEBGL, 1);
+    gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, GL::NEAREST as i32);
+    gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MAG_FILTER, GL::NEAREST as i32);
+    gl.tex_image_2d_with_u32_and_u32_and_html_image_element(
+        GL::TEXTURE_2D,
+        0,
+        GL::RGBA as i32,
+        GL::RGBA,
+        GL::UNSIGNED_BYTE,
+        &image,
+    ).expect("Not a valid texture");
 
     // VAOs and VBOs
     const VERTEX_COUNT: usize = 6;
@@ -166,41 +161,4 @@ fn link_program(
             .get_program_info_log(&program)
             .unwrap_or_else(|| String::from("Unknown error creating program object")))
     }
-}
-
-pub fn texture_from_image(gl: Rc<GL>, url: &str, program: Rc<WebGlProgram>) {
-    let image = Rc::new(RefCell::new(HtmlImageElement::new().unwrap()));
-    let image_for_move = Rc::clone(&image);
-
-    let onload = Closure::wrap(Box::new(move || {
-        let texture = gl.create_texture();
-        gl.active_texture(GL::TEXTURE0); // fixme when we get to actually making stuff, we need to be sure we are using GL::TEXTUREx thing (coz compatibility)
-        gl.bind_texture(GL::TEXTURE_2D, texture.as_ref());
-        // (image uniform location)
-        let u_texture = gl
-            .get_uniform_location(program.clone().as_ref(), "u_texture")
-            .unwrap();
-        gl.uniform1i(Some(&u_texture), 0); // tell the shader to look at texture unit 0
-
-        gl.pixel_storei(GL::UNPACK_FLIP_Y_WEBGL, 1);
-        gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, GL::NEAREST as i32);
-        gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MAG_FILTER, GL::NEAREST as i32);
-        // gl.pixel_storei(GL::UNPACK_FLIP_Y_WEBGL, 1);
-
-        gl.tex_image_2d_with_u32_and_u32_and_html_image_element(
-            GL::TEXTURE_2D,
-            0,
-            GL::RGBA.try_into().unwrap(), // or `as i21` idk
-            GL::RGBA,
-            GL::UNSIGNED_BYTE,
-            &image_for_move.borrow(), // spooky business
-        )
-        .expect("Valid texture");
-    }) as Box<dyn Fn()>);
-
-    let image = image.borrow_mut();
-    image.set_onload(Some(onload.as_ref().unchecked_ref()));
-    image.set_src(url);
-
-    onload.forget();
 }
