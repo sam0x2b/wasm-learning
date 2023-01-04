@@ -29,14 +29,16 @@
           const client = new Client()
           client.start()
 
-          let time = Date.now();
+          let last = Date.now()
 
           function render() {
-            const dt = Date.now() - time
+            const now = Date.now()
+            const dt = now - last
+            last = now
+
             client.update(dt)
             client.render()
             window.requestAnimationFrame(render)
-            time = Date.now()
           }
 
           render()
