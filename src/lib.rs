@@ -55,65 +55,67 @@ pub fn start() -> Result<(), JsValue> {
         &image,
     ).expect("Not a valid texture");
 
-    // VAOs and VBOs
+    // VAO and buffer objects
     const VERTEX_COUNT: usize = 6;
     let vao = gl.create_vertex_array().unwrap();
     gl.bind_vertex_array(Some(&vao));
 
-    // (attribute locations)
-    let a_position = gl.get_attrib_location(&program, "a_position") as u32;
-    let a_uv = gl.get_attrib_location(&program, "a_uv") as u32;
+    // (helper for uploading buffers and setting up attributes)
+    let setup_buffer = |attrib: &str, size: i32, data: &[f32]| -> Result<(), JsValue> {
 
-    {
-        const POSITION_SIZE: usize = 3; // size of position data per vertex
-        let positions: [f32; VERTEX_COUNT * POSITION_SIZE] = [
-            // (hypothetically we could use indexing to cut this down to just /four/ vertices
-            // worth of data... but right now i just dont feel like it)
-            -0.7, 0.7, 0.0, // top left
-            -0.7, -0.7, 0.0, // bottom left
-            0.7, -0.7, 0.0, // bottom right
-            -0.7, 0.7, 0.0, // top left
-            0.7, -0.7, 0.0, // bottom right
-            0.7, 0.7, 0.0, // top right
-        ]; // god i love alignment
-
-        let buffer = gl.create_buffer().ok_or("failed to create buffer")?;
+        // Create, bind, and upload buffer.
+        let buffer = gl.create_buffer().unwrap();
         gl.bind_buffer(GL::ARRAY_BUFFER, Some(&buffer));
         unsafe {
-            // spooky Float32Array::view memory danger
-            let array = js_sys::Float32Array::view(&positions);
+            let array = js_sys::Float32Array::view(data); // memory danger
             gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &array, GL::STATIC_DRAW);
         }
-        gl.vertex_attrib_pointer_with_i32(a_position, POSITION_SIZE as i32, GL::FLOAT, false, 0, 0);
-        gl.enable_vertex_attrib_array(a_position);
-    }
 
-    {
-        const UV_SIZE: usize = 2; // size of uv coordinate data, per vertex.
-        let uvs: [f32; VERTEX_COUNT * UV_SIZE] = [
+        // Set up the attribute thingies
+        let attrib = gl.get_attrib_location(&program, attrib) as u32;
+        gl.vertex_attrib_pointer_with_i32(attrib, size, GL::FLOAT, false, 0, 0);
+        gl.enable_vertex_attrib_array(attrib);
+
+        Ok(())
+    };
+
+    setup_buffer(
+        "a_position", 3,
+        &[
+            // (hypothetically we could use indexing to cut this down to just /four/ vertices
+            // worth of data... but right now i just dont feel like it)
+            -1.7, 0.7, 0.0, // top left
+            -0.7, -0.7, 0.0, // bottom left
+            0.7, -0.7, 0.0, // bottom right
+            -1.7, 0.7, 0.0, // top left
+            0.7, -0.7, 0.0, // bottom right
+            0.7, 0.7, 0.0, // top right
+        ]
+    )?;
+
+    setup_buffer(
+        "a_uv", 2,
+        &[
             0.0, 1.0, // top left
             0.0, 0.0, // bottom left
             1.0, 0.0, // bottom right
             0.0, 1.0, // top left
             1.0, 0.0, // bottom right
             1.0, 1.0, // top right
-        ];
+        ]
+    )?;
 
-        let buffer = gl.create_buffer().ok_or("failed to create buffer")?;
-        gl.bind_buffer(GL::ARRAY_BUFFER, Some(&buffer));
-        unsafe {
-            let array = js_sys::Float32Array::view(&uvs);
-            gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &array, GL::STATIC_DRAW);
-        }
-        gl.vertex_attrib_pointer_with_i32(a_uv, UV_SIZE as i32, GL::FLOAT, false, 0, 0);
-        gl.enable_vertex_attrib_array(a_uv);
-    }
+    // Uniform data
+    // (right now it's just player displacement)
+    let u_displacement = gl.get_uniform_location(&program, "u_displacement").unwrap();
+    gl.uniform2f(Some(&u_displacement), 0.2, -0.6);
 
     // Drawing
     gl.clear_color(0.0, 0.0, 0.0, 1.0);
     gl.clear(GL::COLOR_BUFFER_BIT);
 
     gl.draw_arrays(GL::TRIANGLES, 0, VERTEX_COUNT as i32);
+
     Ok(())
 }
 
