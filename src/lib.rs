@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::WebGl2RenderingContext as GL;
@@ -19,12 +21,13 @@ pub fn start() -> Result<(), JsValue> {
         .unwrap()
         .dyn_into::<web_sys::HtmlCanvasElement>()?;
     let gl = canvas.get_context("webgl2")?.unwrap().dyn_into::<GL>()?;
-    let gl = gl;
+    let gl = Rc::new(gl);
 
     // Shader Program
     let vert_shader = compile_shader(&gl, GL::VERTEX_SHADER, include_str!("./shader.vert"))?;
     let frag_shader = compile_shader(&gl, GL::FRAGMENT_SHADER, include_str!("./shader.frag"))?;
     let program = link_program(&gl, &vert_shader, &frag_shader)?;
+    let program = Rc::new(program);
     gl.use_program(Some(&program));
 
     // Texture Setup
@@ -53,57 +56,35 @@ pub fn start() -> Result<(), JsValue> {
         GL::RGBA,
         GL::UNSIGNED_BYTE,
         &image,
-    ).expect("Not a valid texture");
+    )
+    .expect("Not a valid texture");
 
     // VAO and buffer objects
     const VERTEX_COUNT: usize = 6;
     let vao = gl.create_vertex_array().unwrap();
     gl.bind_vertex_array(Some(&vao));
 
-    // (helper for uploading buffers and setting up attributes)
-    let setup_buffer = |attrib: &str, size: i32, data: &[f32]| -> Result<(), JsValue> {
+    let arr = [
+        // (hypothetically we could use indexing to cut this down to just /four/ vertices
+        // worth of data... but right now i just dont feel like it)
+        -1.7, 0.7, 0.0, // top left
+        -0.7, -0.7, 0.0, // bottom left
+        0.7, -0.7, 0.0, // bottom right
+        -1.7, 0.7, 0.0, // top left
+        0.7, -0.7, 0.0, // bottom right
+        0.7, 0.7, 0.0, // top right
+    ];
+    setup_buffer(gl.clone(), program.clone(), "a_position", 3, &arr)?;
 
-        // Create, bind, and upload buffer.
-        let buffer = gl.create_buffer().unwrap();
-        gl.bind_buffer(GL::ARRAY_BUFFER, Some(&buffer));
-        unsafe {
-            let array = js_sys::Float32Array::view(data); // memory danger
-            gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &array, GL::STATIC_DRAW);
-        }
-
-        // Set up the attribute thingies
-        let attrib = gl.get_attrib_location(&program, attrib) as u32;
-        gl.vertex_attrib_pointer_with_i32(attrib, size, GL::FLOAT, false, 0, 0);
-        gl.enable_vertex_attrib_array(attrib);
-
-        Ok(())
-    };
-
-    setup_buffer(
-        "a_position", 3,
-        &[
-            // (hypothetically we could use indexing to cut this down to just /four/ vertices
-            // worth of data... but right now i just dont feel like it)
-            -1.7, 0.7, 0.0, // top left
-            -0.7, -0.7, 0.0, // bottom left
-            0.7, -0.7, 0.0, // bottom right
-            -1.7, 0.7, 0.0, // top left
-            0.7, -0.7, 0.0, // bottom right
-            0.7, 0.7, 0.0, // top right
-        ]
-    )?;
-
-    setup_buffer(
-        "a_uv", 2,
-        &[
-            0.0, 1.0, // top left
-            0.0, 0.0, // bottom left
-            1.0, 0.0, // bottom right
-            0.0, 1.0, // top left
-            1.0, 0.0, // bottom right
-            1.0, 1.0, // top right
-        ]
-    )?;
+    let arr = [
+        0.0, 1.0, // top left
+        0.0, 0.0, // bottom left
+        1.0, 0.0, // bottom right
+        0.0, 1.0, // top left
+        1.0, 0.0, // bottom right
+        1.0, 1.0, // top right
+    ];
+    setup_buffer(gl.clone(), program.clone(), "a_uv", 2, &arr)?;
 
     // Uniform data
     // (right now it's just player displacement)
@@ -126,16 +107,16 @@ fn compile_shader(gl: &GL, shader_type: u32, source: &str) -> Result<WebGlShader
     gl.shader_source(&shader, source);
     gl.compile_shader(&shader);
 
-    if gl
+    if !gl
         .get_shader_parameter(&shader, GL::COMPILE_STATUS)
         .as_bool()
         .unwrap_or(false)
     {
-        Ok(shader)
-    } else {
         Err(gl
             .get_shader_info_log(&shader)
             .unwrap_or_else(|| String::from("Unknown error creating shader")))
+    } else {
+        Ok(shader)
     }
 }
 
@@ -152,15 +133,39 @@ fn link_program(
     gl.attach_shader(&program, frag_shader);
     gl.link_program(&program);
 
-    if gl
+    if !gl
         .get_program_parameter(&program, GL::LINK_STATUS)
         .as_bool()
         .unwrap_or(false)
     {
-        Ok(program)
-    } else {
         Err(gl
             .get_program_info_log(&program)
             .unwrap_or_else(|| String::from("Unknown error creating program object")))
+    } else {
+        Ok(program)
     }
+}
+
+// a helper for uploading buffers and setting up attributes
+fn setup_buffer(
+    gl: Rc<GL>,
+    program: Rc<WebGlProgram>,
+    attrib: &str,
+    size: i32,
+    data: &[f32],
+) -> Result<(), JsValue> {
+    // Create, bind, and upload buffer.
+    let buffer = gl.create_buffer().unwrap();
+    gl.bind_buffer(GL::ARRAY_BUFFER, Some(&buffer));
+    unsafe {
+        let array = js_sys::Float32Array::view(data); // memory danger
+        gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &array, GL::STATIC_DRAW);
+    }
+
+    // Set up the attribute thingies
+    let attrib = gl.get_attrib_location(&program, attrib) as u32;
+    gl.vertex_attrib_pointer_with_i32(attrib, size, GL::FLOAT, false, 0, 0);
+    gl.enable_vertex_attrib_array(attrib);
+
+    Ok(())
 }
