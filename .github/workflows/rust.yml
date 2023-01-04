@@ -36,7 +36,6 @@ jobs:
       run: |
         cp target/wasm32-unknown-unknown/release/wasm_sample_bg.wasm www/wasm_sample_bg.wasm
         cp target/wasm32-unknown-unknown/release/wasm_sample.js www/wasm_sample.js
-        mv www/wasm_sample.html www/index.html
     - name: yeet
       uses: JamesIves/github-pages-deploy-action@v4
       with:

@@ -1,123 +1,171 @@
+use std::rc::Rc;
+
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{WebGlProgram, WebGlRenderingContext, WebGlShader};
+use web_sys::WebGl2RenderingContext as GL;
+use web_sys::*; // todo selective imports later
+
+#[wasm_bindgen]
+pub fn init_panic_hook() {
+    console_error_panic_hook::set_once();
+}
 
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
+    init_panic_hook();
+
+    // DOM
     let document = web_sys::window().unwrap().document().unwrap();
-    let canvas = document.get_element_by_id("canvas").unwrap();
-    let canvas: web_sys::HtmlCanvasElement = canvas.dyn_into::<web_sys::HtmlCanvasElement>()?;
-
-    let context = canvas
-        .get_context("webgl")?
+    let canvas = document
+        .get_element_by_id("canvas")
         .unwrap()
-        .dyn_into::<WebGlRenderingContext>()?;
+        .dyn_into::<web_sys::HtmlCanvasElement>()?;
+    let gl = canvas.get_context("webgl2")?.unwrap().dyn_into::<GL>()?;
+    let gl = Rc::new(gl);
 
-    let vert_shader = compile_shader(
-        &context,
-        WebGlRenderingContext::VERTEX_SHADER,
-        r#"
-        attribute vec4 position;
-        void main() {
-            gl_Position = position;
-        }
-    "#,
-    )?;
-    let frag_shader = compile_shader(
-        &context,
-        WebGlRenderingContext::FRAGMENT_SHADER,
-        r#"
-        void main() {
-            gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
-        }
-    "#,
-    )?;
-    let program = link_program(&context, &vert_shader, &frag_shader)?;
-    context.use_program(Some(&program));
+    // Shader Program
+    let vert_shader = compile_shader(&gl, GL::VERTEX_SHADER, include_str!("./shader.vert"))?;
+    let frag_shader = compile_shader(&gl, GL::FRAGMENT_SHADER, include_str!("./shader.frag"))?;
+    let program = link_program(&gl, &vert_shader, &frag_shader)?;
+    let program = Rc::new(program);
+    gl.use_program(Some(&program));
 
-    let vertices: [f32; 9] = [-0.7, -0.7, 0.0, 0.7, -0.7, 0.0, 0.0, 0.7, 0.0];
+    // Texture Setup
+    // (referring to https://webgl2fundamentals.org/webgl/lessons/webgl-image-processing.html)
+    let image = document
+        .get_element_by_id("texture")
+        .unwrap()
+        .dyn_into::<web_sys::HtmlImageElement>()?;
 
-    let buffer = context.create_buffer().ok_or("failed to create buffer")?;
-    context.bind_buffer(WebGlRenderingContext::ARRAY_BUFFER, Some(&buffer));
+    // (create and bind texture)
+    let texture = gl.create_texture().unwrap();
+    gl.active_texture(GL::TEXTURE0); // fixme when we get to actually making stuff, we need to be sure we are using GL::TEXTUREx thing (coz compatibility)
+    gl.bind_texture(GL::TEXTURE_2D, Some(&texture));
 
-    // Note that `Float32Array::view` is somewhat dangerous (hence the
-    // `unsafe`!). This is creating a raw view into our module's
-    // `WebAssembly.Memory` buffer, but if we allocate more pages for ourself
-    // (aka do a memory allocation in Rust) it'll cause the buffer to change,
-    // causing the `Float32Array` to be invalid.
-    //
-    // As a result, after `Float32Array::view` we have to be very careful not to
-    // do any memory allocations before it's dropped.
-    unsafe {
-        let vert_array = js_sys::Float32Array::view(&vertices);
+    // (image uniform location)
+    let u_texture = gl.get_uniform_location(&program, "u_texture").unwrap();
+    gl.uniform1i(Some(&u_texture), 0); // tell the shader to look at texture unit 0
 
-        context.buffer_data_with_array_buffer_view(
-            WebGlRenderingContext::ARRAY_BUFFER,
-            &vert_array,
-            WebGlRenderingContext::STATIC_DRAW,
-        );
-    }
-
-    context.vertex_attrib_pointer_with_i32(0, 3, WebGlRenderingContext::FLOAT, false, 0, 0);
-    context.enable_vertex_attrib_array(0);
-
-    context.clear_color(0.0, 0.0, 0.0, 1.0);
-    context.clear(WebGlRenderingContext::COLOR_BUFFER_BIT);
-
-    context.draw_arrays(
-        WebGlRenderingContext::TRIANGLES,
+    gl.pixel_storei(GL::UNPACK_FLIP_Y_WEBGL, 1);
+    gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, GL::NEAREST as i32);
+    gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MAG_FILTER, GL::NEAREST as i32);
+    gl.tex_image_2d_with_u32_and_u32_and_html_image_element(
+        GL::TEXTURE_2D,
         0,
-        (vertices.len() / 3) as i32,
-    );
+        GL::RGBA as i32,
+        GL::RGBA,
+        GL::UNSIGNED_BYTE,
+        &image,
+    )
+    .expect("Not a valid texture");
+
+    // VAO and buffer objects
+    const VERTEX_COUNT: usize = 6;
+    let vao = gl.create_vertex_array().unwrap();
+    gl.bind_vertex_array(Some(&vao));
+
+    let arr = [
+        // (hypothetically we could use indexing to cut this down to just /four/ vertices
+        // worth of data... but right now i just dont feel like it)
+        -1.7, 0.7, 0.0, // top left
+        -0.7, -0.7, 0.0, // bottom left
+        0.7, -0.7, 0.0, // bottom right
+        -1.7, 0.7, 0.0, // top left
+        0.7, -0.7, 0.0, // bottom right
+        0.7, 0.7, 0.0, // top right
+    ];
+    setup_buffer(gl.clone(), program.clone(), "a_position", 3, &arr)?;
+
+    let arr = [
+        0.0, 1.0, // top left
+        0.0, 0.0, // bottom left
+        1.0, 0.0, // bottom right
+        0.0, 1.0, // top left
+        1.0, 0.0, // bottom right
+        1.0, 1.0, // top right
+    ];
+    setup_buffer(gl.clone(), program.clone(), "a_uv", 2, &arr)?;
+
+    // Uniform data
+    // (right now it's just player displacement)
+    let u_displacement = gl.get_uniform_location(&program, "u_displacement").unwrap();
+    gl.uniform2f(Some(&u_displacement), 0.2, -0.6);
+
+    // Drawing
+    gl.clear_color(0.0, 0.0, 0.0, 1.0);
+    gl.clear(GL::COLOR_BUFFER_BIT);
+
+    gl.draw_arrays(GL::TRIANGLES, 0, VERTEX_COUNT as i32);
+
     Ok(())
 }
 
-pub fn compile_shader(
-    context: &WebGlRenderingContext,
-    shader_type: u32,
-    source: &str,
-) -> Result<WebGlShader, String> {
-    let shader = context
+fn compile_shader(gl: &GL, shader_type: u32, source: &str) -> Result<WebGlShader, String> {
+    let shader = gl
         .create_shader(shader_type)
         .ok_or_else(|| String::from("Unable to create shader object"))?;
-    context.shader_source(&shader, source);
-    context.compile_shader(&shader);
+    gl.shader_source(&shader, source);
+    gl.compile_shader(&shader);
 
-    if context
-        .get_shader_parameter(&shader, WebGlRenderingContext::COMPILE_STATUS)
+    if !gl
+        .get_shader_parameter(&shader, GL::COMPILE_STATUS)
         .as_bool()
         .unwrap_or(false)
     {
-        Ok(shader)
-    } else {
-        Err(context
+        Err(gl
             .get_shader_info_log(&shader)
             .unwrap_or_else(|| String::from("Unknown error creating shader")))
+    } else {
+        Ok(shader)
     }
 }
 
-pub fn link_program(
-    context: &WebGlRenderingContext,
+fn link_program(
+    gl: &GL,
     vert_shader: &WebGlShader,
     frag_shader: &WebGlShader,
 ) -> Result<WebGlProgram, String> {
-    let program = context
+    let program = gl
         .create_program()
         .ok_or_else(|| String::from("Unable to create shader object"))?;
 
-    context.attach_shader(&program, vert_shader);
-    context.attach_shader(&program, frag_shader);
-    context.link_program(&program);
+    gl.attach_shader(&program, vert_shader);
+    gl.attach_shader(&program, frag_shader);
+    gl.link_program(&program);
 
-    if context
-        .get_program_parameter(&program, WebGlRenderingContext::LINK_STATUS)
+    if !gl
+        .get_program_parameter(&program, GL::LINK_STATUS)
         .as_bool()
         .unwrap_or(false)
     {
-        Ok(program)
-    } else {
-        Err(context
+        Err(gl
             .get_program_info_log(&program)
             .unwrap_or_else(|| String::from("Unknown error creating program object")))
+    } else {
+        Ok(program)
     }
+}
+
+// a helper for uploading buffers and setting up attributes
+fn setup_buffer(
+    gl: Rc<GL>,
+    program: Rc<WebGlProgram>,
+    attrib: &str,
+    size: i32,
+    data: &[f32],
+) -> Result<(), JsValue> {
+    // Create, bind, and upload buffer.
+    let buffer = gl.create_buffer().unwrap();
+    gl.bind_buffer(GL::ARRAY_BUFFER, Some(&buffer));
+    unsafe {
+        let array = js_sys::Float32Array::view(data); // memory danger
+        gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &array, GL::STATIC_DRAW);
+    }
+
+    // Set up the attribute thingies
+    let attrib = gl.get_attrib_location(&program, attrib) as u32;
+    gl.vertex_attrib_pointer_with_i32(attrib, size, GL::FLOAT, false, 0, 0);
+    gl.enable_vertex_attrib_array(attrib);
+
+    Ok(())
 }
