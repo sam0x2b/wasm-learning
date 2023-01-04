@@ -3,6 +3,18 @@
 <head>
   <title>wasm_sample</title>
   <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+
+  <style>
+    #canvas {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      margin: auto;
+    }
+  </style>
+
 </head>
 
 <body style="background: black;">
@@ -18,7 +30,7 @@
           client.start()
 
           let time = Date.now();
-          
+
           function render() {
             const dt = Date.now() - time
             client.update(dt)
