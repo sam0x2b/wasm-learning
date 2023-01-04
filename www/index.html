@@ -3,24 +3,34 @@
 <head>
   <title>wasm_sample</title>
   <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
-  <!-- because ES6 -->
-  <script type="module">
-    import { start, default as init } from './wasm_sample.js';
-
-
-    async function run() {
-          await init('./wasm_sample_bg.wasm');
-          window.start = start;
-    }
-
-    // (for the sake of not handling async logic on the rust side of things)
-    // (that way our image is nice and loaded when the wasm runs!)
-    document.addEventListener('DOMContentLoaded', run);
-    // run();
-  </script>
 </head>
 
 <body style="background: black;">
+  <!-- because ES6 -->
+  <script type="module">
+    import { Client, default as init } from './wasm_sample.js';
+
+    window.addEventListener('load', function () {
+      init('./wasm_sample_bg.wasm')
+        .then(function () {
+
+          const client = new Client()
+          client.start()
+
+          let time = Date.now();
+          
+          function render() {
+            const dt = Date.now() - time
+            client.update(dt)
+            client.render()
+            window.requestAnimationFrame(render)
+            time = Date.now()
+          }
+
+          render()
+        })
+    })
+  </script>
   <canvas id="canvas" height="150" width="150"></canvas>
   <img src="test.webp" id="texture" hidden>
 </body>
