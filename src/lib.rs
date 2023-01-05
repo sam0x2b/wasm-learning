@@ -9,9 +9,11 @@ use web_sys::*; // todo selective imports later
 pub struct Client {
     // todo add game state here
     time: f32,
+    canvas: HtmlCanvasElement,
     gl: Rc<GL>,
     program: Rc<WebGlProgram>, // keeping it here for now, later it will be attached to a draw list
     u_displacement: WebGlUniformLocation,
+    u_canvas_size: WebGlUniformLocation,
     texture: WebGlTexture,
     vao: WebGlVertexArrayObject,
     vertex_count: i32,
@@ -29,7 +31,7 @@ impl Client {
         let canvas = document
             .get_element_by_id("canvas")
             .unwrap()
-            .dyn_into::<web_sys::HtmlCanvasElement>()
+            .dyn_into::<HtmlCanvasElement>()
             .unwrap();
         let gl = canvas
             .get_context("webgl2")
@@ -49,6 +51,7 @@ impl Client {
 
         // Uniforms
         let u_displacement = gl.get_uniform_location(program.as_ref(), "u_displacement").unwrap();
+        let u_canvas_size = gl.get_uniform_location(program.as_ref(), "u_canvas_size").unwrap();
 
         // Texture setup (see https://webgl2fundamentals.org/webgl/lessons/webgl-image-processing.html)
         let image = web_sys::window()
@@ -57,7 +60,7 @@ impl Client {
             .unwrap()
             .get_element_by_id("texture")
             .unwrap()
-            .dyn_into::<web_sys::HtmlImageElement>()
+            .dyn_into::<HtmlImageElement>()
             .unwrap(); // ((another unwrap, purely because `?;` doesn't match return value (sorry sam)
 
         // (create and bind texture)
@@ -86,15 +89,15 @@ impl Client {
         let vao = gl.create_vertex_array().unwrap();
         gl.bind_vertex_array(Some(&vao));
 
-        setup_buffer(gl.clone(), program.clone(), "a_position", 3, &[
+        setup_buffer(gl.clone(), program.clone(), "a_position", 2, &[
             // (hypothetically we could use indexing to cut this down to just /four/ vertices
             // worth of data... but right now i just dont feel like it)
-            -0.7, 0.7, 0.0, // top left
-            -0.7, -0.7, 0.0, // bottom left
-            0.7, -0.7, 0.0, // bottom right
-            -0.7, 0.7, 0.0, // top left
-            0.7, -0.7, 0.0, // bottom right
-            0.7, 0.7, 0.0, // top right
+            -60.0, 60.0, // top left
+            -60.0, -60.0, // bottom left
+            60.0, -60.0, // bottom right
+            -60.0, 60.0, // top left
+            60.0, -60.0, // bottom right
+            60.0, 60.0, // top right
         ]).unwrap();
 
         setup_buffer(gl.clone(), program.clone(), "a_uv", 2, &[
@@ -113,10 +116,12 @@ impl Client {
 
         Client {
             time: 0.0,
+            canvas,
             gl,
             vertex_count: 6,
             program,
             u_displacement,
+            u_canvas_size,
             texture,
             vao,
         }
@@ -126,17 +131,14 @@ impl Client {
     #[no_mangle]
     pub fn update(&mut self, dt: f32) {
         self.time += dt;
+        let i = (self.time * 0.001).cos() * 4.0 + 2.0; // intensity
+        let x = i * (self.time * 0.006).cos() * 12.0;
+        let y = i * (self.time * 0.01).sin() * 12.0;
 
         // Uniforms
         let gl = &self.gl;
         gl.use_program(Some(&self.program));
-
-        gl.uniform2f(
-            Some(&self.u_displacement),
-            (self.time * 0.006).cos() * 0.2,
-            (self.time * 0.01).sin() * 0.2
-        );
-
+        gl.uniform2f(Some(&self.u_displacement), x, y);
         gl.use_program(None);
 
     }
@@ -145,6 +147,22 @@ impl Client {
     #[no_mangle]
     pub fn render(&mut self) {
         let gl = &self.gl;
+
+        // Check canvas size.
+        let c = &self.canvas;
+        let size        = (c.width() as i32, c.height() as i32);
+        let client_size = (c.client_width(), c.client_height());
+
+        if size != client_size {
+            c.set_height(c.client_height() as u32);
+            c.set_width(c.client_width() as u32);
+
+            gl.viewport(0, 0, c.client_width(), c.client_height());
+
+            gl.use_program(Some(&self.program));
+            gl.uniform2f(Some(&self.u_canvas_size), c.client_width() as f32, c.client_height() as f32);
+            gl.use_program(None);
+        }
 
         // Bind
         gl.use_program(Some(&self.program));
