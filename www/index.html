@@ -12,12 +12,15 @@
       left: 0;
       right: 0;
       margin: auto;
+
+      width: 100vw;
+      height: 100vh;
     }
   </style>
 
 </head>
 
-<body style="background: black;">
+<body style="background: white;">
   <!-- because ES6 -->
   <script type="module">
     import { Client, default as init } from './wasm_sample.js';
@@ -27,7 +30,6 @@
         .then(function () {
 
           const client = new Client()
-          client.start()
 
           let last = Date.now()
 
