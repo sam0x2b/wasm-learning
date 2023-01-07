@@ -1,12 +1,15 @@
 use std::borrow::Borrow;
+use std::borrow::BorrowMut;
+use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use web_sys::Document;
+use web_sys::Window;
 use web_sys::{ HtmlCanvasElement, HtmlImageElement, WebGl2RenderingContext as GL, WebGlProgram,
     WebGlShader, WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject };
 
 struct Renderer {
-    canvas: HtmlCanvasElement,
     gl: Rc<GL>,
 
     texture: WebGlTexture,
@@ -19,14 +22,8 @@ struct Renderer {
 }
 
 impl Renderer {
-    fn new() -> Self {
+    fn new(canvas: &HtmlCanvasElement) -> Self {
         // WebGL context
-        let document = web_sys::window().unwrap().document().unwrap();
-        let canvas = document
-            .get_element_by_id("canvas")
-            .unwrap()
-            .dyn_into::<HtmlCanvasElement>()
-            .unwrap();
         let gl = canvas
             .get_context("webgl2")
             .unwrap()
@@ -76,8 +73,7 @@ impl Renderer {
             GL::RGBA,
             GL::UNSIGNED_BYTE,
             &image,
-        )
-        .expect("Not a valid texture");
+        ).expect("Not a valid texture");
 
         // VAO and buffer objects
         let vao = gl.create_vertex_array().unwrap();
@@ -110,7 +106,6 @@ impl Renderer {
         gl.use_program(None);
 
         Renderer {
-            canvas,
             gl,
 
             texture,
@@ -124,14 +119,74 @@ impl Renderer {
     }
 }
 
+struct Controls {
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+    accelerate_mode: bool,
+}
+
+impl Controls {
+    fn new() -> Self {
+        Self {
+            up: false,
+            down: false,
+            left: false,
+            right: false,
+            accelerate_mode: false,
+        }
+    }
+}
+
 struct Scene {
+    controls: Rc<RefCell<Controls>>,
     time: f32,
     player: (f32, f32),
 }
 
 impl Scene {
-    fn new() -> Self {
+    fn new(window: &Window) -> Self {
+        let controls = Rc::new(RefCell::new(Controls::new()));
+
+        // (sobbing on my hands and knees)
+        // (it's terrible... but it works!)
+        let a = Closure::<dyn FnMut(_)>::new({
+            let controls = controls.clone();
+            move |event: web_sys::KeyboardEvent| {
+                let mut controls = controls.as_ref().borrow_mut();
+                match event.key().as_str() {
+                    "ArrowUp" => { controls.up = true },
+                    "ArrowDown" => { controls.down = true },
+                    "ArrowLeft" => { controls.left = true },
+                    "ArrowRight" => { controls.right = true },
+                    _ => {}
+                }
+            }
+        });
+        window.add_event_listener_with_callback("keydown", a.as_ref().unchecked_ref()).unwrap();
+        a.forget();
+
+        let a = Closure::<dyn FnMut(_)>::new({
+            let controls = controls.clone();
+            move |event: web_sys::KeyboardEvent| {
+                let mut controls = controls.as_ref().borrow_mut();
+                match event.key().as_str() {
+                    "ArrowUp" => { controls.up = false },
+                    "ArrowDown" => { controls.down = false },
+                    "ArrowLeft" => { controls.left = false },
+                    "ArrowRight" => { controls.right = false },
+                    _ => {}
+                }
+            }
+        });
+        window.add_event_listener_with_callback("keyup", a.as_ref().unchecked_ref()).unwrap();
+        a.forget();
+
+        // todo: window on lose focus (make all controls false)
+
         Self {
+            controls,
             time: 0.0,
             player: (0.0, 0.0),
         }
@@ -140,8 +195,12 @@ impl Scene {
 
 #[wasm_bindgen]
 pub struct Client {
-    renderer: Renderer,
-    scene: Scene,
+    window: Window,
+    document: Document,
+    canvas: HtmlCanvasElement,
+
+    renderer: Renderer, // Holds GL related state
+    scene: Scene, // Holds scene state
 }
 
 #[wasm_bindgen]
@@ -150,17 +209,32 @@ impl Client {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         console_error_panic_hook::set_once();
-        Client {
-            renderer: Renderer::new(),
-            scene: Scene::new(),
+
+        let window = web_sys::window().expect("Should've obtained window");
+        let document = window.document().expect("Should've obtained document");
+        let canvas = document
+            .get_element_by_id("canvas")
+            .expect("Should've found element #canvas")
+            .dyn_into::<HtmlCanvasElement>()
+            .expect("#canvas should've been cast to HtmlCanvasElement");
+
+        Self {
+            renderer: Renderer::new(&canvas),
+            scene: Scene::new(&window),
+
+            window,
+            document,
+            canvas,
         }
     }
 
     // called once every `requestAnimationFrame`
     #[no_mangle]
-    pub fn update(&mut self, dt: f32) {
+    pub fn update(&mut self, mut dt: f32) {
         let scene = &mut self.scene;
 
+        if scene.controls.as_ref().borrow().up { dt *= 2.0; }
+        if scene.controls.as_ref().borrow().down { dt *= 0.5; }
         scene.time += dt;
 
         let i = (scene.time * 0.001).cos() * 4.0 + 2.0; // intensity
@@ -177,7 +251,7 @@ impl Client {
         let gl = &renderer.gl;
 
         // Check canvas size.
-        let c = &renderer.canvas;
+        let c = &self.canvas;
         let size        = (c.width() as i32, c.height() as i32);
         let client_size = (c.client_width(), c.client_height());
 
