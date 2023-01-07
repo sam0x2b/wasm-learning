@@ -2,30 +2,24 @@ use std::borrow::Borrow;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::WebGl2RenderingContext as GL;
-use web_sys::*; // todo selective imports later
+use web_sys::{ HtmlCanvasElement, HtmlImageElement, WebGl2RenderingContext as GL, WebGlProgram,
+    WebGlShader, WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject };
 
-#[wasm_bindgen]
-pub struct Client {
-    // todo add game state here
-    time: f32,
+struct Renderer {
     canvas: HtmlCanvasElement,
     gl: Rc<GL>,
-    program: Rc<WebGlProgram>, // keeping it here for now, later it will be attached to a draw list
-    u_displacement: WebGlUniformLocation,
-    u_canvas_size: WebGlUniformLocation,
+
     texture: WebGlTexture,
     vao: WebGlVertexArrayObject,
     vertex_count: i32,
+
+    program: Rc<WebGlProgram>, // keeping it here for now, later it will be attached to a draw list
+    u_displacement: WebGlUniformLocation,
+    u_canvas_size: WebGlUniformLocation,
 }
 
-#[wasm_bindgen]
-impl Client {
-    /// Create a new web client
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> Client {
-        console_error_panic_hook::set_once();
-
+impl Renderer {
+    fn new() -> Self {
         // WebGL context
         let document = web_sys::window().unwrap().document().unwrap();
         let canvas = document
@@ -88,6 +82,7 @@ impl Client {
         // VAO and buffer objects
         let vao = gl.create_vertex_array().unwrap();
         gl.bind_vertex_array(Some(&vao));
+        let vertex_count = 6;
 
         setup_buffer(gl.clone(), program.clone(), "a_position", 2, &[
             // (hypothetically we could use indexing to cut this down to just /four/ vertices
@@ -114,42 +109,75 @@ impl Client {
         gl.bind_texture(GL::TEXTURE_2D, None);
         gl.use_program(None);
 
-        Client {
-            time: 0.0,
+        Renderer {
             canvas,
             gl,
-            vertex_count: 6,
+
+            texture,
+            vao,
+            vertex_count,
+
             program,
             u_displacement,
             u_canvas_size,
-            texture,
-            vao,
+        }
+    }
+}
+
+struct Scene {
+    time: f32,
+    player: (f32, f32),
+}
+
+impl Scene {
+    fn new() -> Self {
+        Self {
+            time: 0.0,
+            player: (0.0, 0.0),
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub struct Client {
+    renderer: Renderer,
+    scene: Scene,
+}
+
+#[wasm_bindgen]
+impl Client {
+    /// Create a new web client
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        console_error_panic_hook::set_once();
+        Client {
+            renderer: Renderer::new(),
+            scene: Scene::new(),
         }
     }
 
-    // called before `render()` once every requestAnimationFrame
+    // called once every `requestAnimationFrame`
     #[no_mangle]
     pub fn update(&mut self, dt: f32) {
-        self.time += dt;
-        let i = (self.time * 0.001).cos() * 4.0 + 2.0; // intensity
-        let x = i * (self.time * 0.006).cos() * 12.0;
-        let y = i * (self.time * 0.01).sin() * 12.0;
+        let scene = &mut self.scene;
 
-        // Uniforms
-        let gl = &self.gl;
-        gl.use_program(Some(&self.program));
-        gl.uniform2f(Some(&self.u_displacement), x, y);
-        gl.use_program(None);
+        scene.time += dt;
 
+        let i = (scene.time * 0.001).cos() * 4.0 + 2.0; // intensity
+        scene.player = (
+            i * (scene.time * 0.006).cos() * 12.0,
+            i * (scene.time * 0.01).sin() * 12.0
+        );
     }
 
     // called once every `requestAnimationFrame`
     #[no_mangle]
     pub fn render(&mut self) {
-        let gl = &self.gl;
+        let renderer = &self.renderer;
+        let gl = &renderer.gl;
 
         // Check canvas size.
-        let c = &self.canvas;
+        let c = &renderer.canvas;
         let size        = (c.width() as i32, c.height() as i32);
         let client_size = (c.client_width(), c.client_height());
 
@@ -159,20 +187,24 @@ impl Client {
 
             gl.viewport(0, 0, c.client_width(), c.client_height());
 
-            gl.use_program(Some(&self.program));
-            gl.uniform2f(Some(&self.u_canvas_size), c.client_width() as f32, c.client_height() as f32);
+            gl.use_program(Some(&renderer.program));
+            gl.uniform2f(Some(&renderer.u_canvas_size), c.client_width() as f32, c.client_height() as f32);
             gl.use_program(None);
         }
 
+        // Update uniforms
+        gl.use_program(Some(&renderer.program));
+        let scene = &self.scene;
+        gl.uniform2f(Some(&renderer.u_displacement), scene.player.0, scene.player.1);
+
         // Bind
-        gl.use_program(Some(&self.program));
-        gl.bind_texture(GL::TEXTURE_2D, Some(&self.texture));
-        gl.bind_vertex_array(Some(&self.vao));
+        gl.bind_texture(GL::TEXTURE_2D, Some(&renderer.texture));
+        gl.bind_vertex_array(Some(&renderer.vao));
 
         // Draw
         gl.clear_color(0.0, 0.0, 0.0, 1.0);
         gl.clear(GL::COLOR_BUFFER_BIT);
-        gl.draw_arrays(GL::TRIANGLES, 0, self.vertex_count);
+        gl.draw_arrays(GL::TRIANGLES, 0, renderer.vertex_count);
 
         // Unbind
         gl.bind_vertex_array(None);
