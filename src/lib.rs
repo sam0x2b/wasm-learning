@@ -1,38 +1,29 @@
 use std::borrow::Borrow;
+use std::borrow::BorrowMut;
+use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::WebGl2RenderingContext as GL;
-use web_sys::*; // todo selective imports later
+use web_sys::Document;
+use web_sys::Window;
+use web_sys::{ HtmlCanvasElement, HtmlImageElement, WebGl2RenderingContext as GL, WebGlProgram,
+    WebGlShader, WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject };
 
-#[wasm_bindgen]
-pub struct Client {
-    // todo add game state here
-    time: f32,
-    canvas: HtmlCanvasElement,
+struct Renderer {
     gl: Rc<GL>,
-    program: Rc<WebGlProgram>, // keeping it here for now, later it will be attached to a draw list
-    u_displacement: WebGlUniformLocation,
-    u_canvas_size: WebGlUniformLocation,
+
     texture: WebGlTexture,
     vao: WebGlVertexArrayObject,
     vertex_count: i32,
+
+    program: Rc<WebGlProgram>, // keeping it here for now, later it will be attached to a draw list
+    u_displacement: WebGlUniformLocation,
+    u_canvas_size: WebGlUniformLocation,
 }
 
-#[wasm_bindgen]
-impl Client {
-    /// Create a new web client
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> Client {
-        console_error_panic_hook::set_once();
-
+impl Renderer {
+    fn new(canvas: &HtmlCanvasElement) -> Self {
         // WebGL context
-        let document = web_sys::window().unwrap().document().unwrap();
-        let canvas = document
-            .get_element_by_id("canvas")
-            .unwrap()
-            .dyn_into::<HtmlCanvasElement>()
-            .unwrap();
         let gl = canvas
             .get_context("webgl2")
             .unwrap()
@@ -82,12 +73,12 @@ impl Client {
             GL::RGBA,
             GL::UNSIGNED_BYTE,
             &image,
-        )
-        .expect("Not a valid texture");
+        ).expect("Not a valid texture");
 
         // VAO and buffer objects
         let vao = gl.create_vertex_array().unwrap();
         gl.bind_vertex_array(Some(&vao));
+        let vertex_count = 6;
 
         setup_buffer(gl.clone(), program.clone(), "a_position", 2, &[
             // (hypothetically we could use indexing to cut this down to just /four/ vertices
@@ -114,39 +105,150 @@ impl Client {
         gl.bind_texture(GL::TEXTURE_2D, None);
         gl.use_program(None);
 
-        Client {
-            time: 0.0,
-            canvas,
+        Renderer {
             gl,
-            vertex_count: 6,
+
+            texture,
+            vao,
+            vertex_count,
+
             program,
             u_displacement,
             u_canvas_size,
-            texture,
-            vao,
+        }
+    }
+}
+
+struct Controls {
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+    accelerate_mode: bool,
+}
+
+impl Controls {
+    fn new() -> Self {
+        Self {
+            up: false,
+            down: false,
+            left: false,
+            right: false,
+            accelerate_mode: false,
+        }
+    }
+}
+
+struct Scene {
+    controls: Rc<RefCell<Controls>>,
+    time: f32,
+    player: (f32, f32),
+}
+
+impl Scene {
+    fn new(window: &Window) -> Self {
+        let controls = Rc::new(RefCell::new(Controls::new()));
+
+        // (sobbing on my hands and knees)
+        // (it's terrible... but it works!)
+        let a = Closure::<dyn FnMut(_)>::new({
+            let controls = controls.clone();
+            move |event: web_sys::KeyboardEvent| {
+                let mut controls = controls.as_ref().borrow_mut();
+                match event.key().as_str() {
+                    "ArrowUp" => { controls.up = true },
+                    "ArrowDown" => { controls.down = true },
+                    "ArrowLeft" => { controls.left = true },
+                    "ArrowRight" => { controls.right = true },
+                    _ => {}
+                }
+            }
+        });
+        window.add_event_listener_with_callback("keydown", a.as_ref().unchecked_ref()).unwrap();
+        a.forget();
+
+        let a = Closure::<dyn FnMut(_)>::new({
+            let controls = controls.clone();
+            move |event: web_sys::KeyboardEvent| {
+                let mut controls = controls.as_ref().borrow_mut();
+                match event.key().as_str() {
+                    "ArrowUp" => { controls.up = false },
+                    "ArrowDown" => { controls.down = false },
+                    "ArrowLeft" => { controls.left = false },
+                    "ArrowRight" => { controls.right = false },
+                    _ => {}
+                }
+            }
+        });
+        window.add_event_listener_with_callback("keyup", a.as_ref().unchecked_ref()).unwrap();
+        a.forget();
+
+        // todo: window on lose focus (make all controls false)
+
+        Self {
+            controls,
+            time: 0.0,
+            player: (0.0, 0.0),
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub struct Client {
+    window: Window,
+    document: Document,
+    canvas: HtmlCanvasElement,
+
+    renderer: Renderer, // Holds GL related state
+    scene: Scene, // Holds scene state
+}
+
+#[wasm_bindgen]
+impl Client {
+    /// Create a new web client
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        console_error_panic_hook::set_once();
+
+        let window = web_sys::window().expect("Should've obtained window");
+        let document = window.document().expect("Should've obtained document");
+        let canvas = document
+            .get_element_by_id("canvas")
+            .expect("Should've found element #canvas")
+            .dyn_into::<HtmlCanvasElement>()
+            .expect("#canvas should've been cast to HtmlCanvasElement");
+
+        Self {
+            renderer: Renderer::new(&canvas),
+            scene: Scene::new(&window),
+
+            window,
+            document,
+            canvas,
         }
     }
 
-    // called before `render()` once every requestAnimationFrame
+    // called once every `requestAnimationFrame`
     #[no_mangle]
-    pub fn update(&mut self, dt: f32) {
-        self.time += dt;
-        let i = (self.time * 0.001).cos() * 4.0 + 2.0; // intensity
-        let x = i * (self.time * 0.006).cos() * 12.0;
-        let y = i * (self.time * 0.01).sin() * 12.0;
+    pub fn update(&mut self, mut dt: f32) {
+        let scene = &mut self.scene;
 
-        // Uniforms
-        let gl = &self.gl;
-        gl.use_program(Some(&self.program));
-        gl.uniform2f(Some(&self.u_displacement), x, y);
-        gl.use_program(None);
+        if scene.controls.as_ref().borrow().up { dt *= 2.0; }
+        if scene.controls.as_ref().borrow().down { dt *= 0.5; }
+        scene.time += dt;
 
+        let i = (scene.time * 0.001).cos() * 4.0 + 2.0; // intensity
+        scene.player = (
+            i * (scene.time * 0.006).cos() * 12.0,
+            i * (scene.time * 0.01).sin() * 12.0
+        );
     }
 
     // called once every `requestAnimationFrame`
     #[no_mangle]
     pub fn render(&mut self) {
-        let gl = &self.gl;
+        let renderer = &self.renderer;
+        let gl = &renderer.gl;
 
         // Check canvas size.
         let c = &self.canvas;
@@ -159,20 +261,24 @@ impl Client {
 
             gl.viewport(0, 0, c.client_width(), c.client_height());
 
-            gl.use_program(Some(&self.program));
-            gl.uniform2f(Some(&self.u_canvas_size), c.client_width() as f32, c.client_height() as f32);
+            gl.use_program(Some(&renderer.program));
+            gl.uniform2f(Some(&renderer.u_canvas_size), c.client_width() as f32, c.client_height() as f32);
             gl.use_program(None);
         }
 
+        // Update uniforms
+        gl.use_program(Some(&renderer.program));
+        let scene = &self.scene;
+        gl.uniform2f(Some(&renderer.u_displacement), scene.player.0, scene.player.1);
+
         // Bind
-        gl.use_program(Some(&self.program));
-        gl.bind_texture(GL::TEXTURE_2D, Some(&self.texture));
-        gl.bind_vertex_array(Some(&self.vao));
+        gl.bind_texture(GL::TEXTURE_2D, Some(&renderer.texture));
+        gl.bind_vertex_array(Some(&renderer.vao));
 
         // Draw
         gl.clear_color(0.0, 0.0, 0.0, 1.0);
         gl.clear(GL::COLOR_BUFFER_BIT);
-        gl.draw_arrays(GL::TRIANGLES, 0, self.vertex_count);
+        gl.draw_arrays(GL::TRIANGLES, 0, renderer.vertex_count);
 
         // Unbind
         gl.bind_vertex_array(None);
