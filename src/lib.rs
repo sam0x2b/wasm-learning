@@ -1,13 +1,12 @@
-use std::borrow::Borrow;
-use std::borrow::BorrowMut;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::Document;
-use web_sys::Window;
-use web_sys::{ HtmlCanvasElement, HtmlImageElement, WebGl2RenderingContext as GL, WebGlProgram,
-    WebGlShader, WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject };
+use web_sys::{ Document, Window };
+use web_sys::{ HtmlCanvasElement, HtmlImageElement };
+use web_sys::{ WebGl2RenderingContext as GL, WebGlProgram, WebGlShader, WebGlTexture,
+    WebGlUniformLocation, WebGlVertexArrayObject };
 
 struct Renderer {
     gl: Rc<GL>,
@@ -33,9 +32,9 @@ impl Renderer {
         let gl = Rc::new(gl);
 
         // Shader program
-        let vert_shader = compile_shader(&gl, GL::VERTEX_SHADER, include_str!("./shader.vert")).unwrap();
-        let frag_shader = compile_shader(&gl, GL::FRAGMENT_SHADER, include_str!("./shader.frag")).unwrap();
-        let program = link_program(&gl, &vert_shader, &frag_shader).unwrap();
+        let vert_shader = Self::compile_shader(&gl, GL::VERTEX_SHADER, include_str!("./shader.vert")).unwrap();
+        let frag_shader = Self::compile_shader(&gl, GL::FRAGMENT_SHADER, include_str!("./shader.frag")).unwrap();
+        let program = Self::link_program(&gl, &vert_shader, &frag_shader).unwrap();
         let program = Rc::new(program);
 
         gl.use_program(Some(&program));
@@ -80,7 +79,7 @@ impl Renderer {
         gl.bind_vertex_array(Some(&vao));
         let vertex_count = 6;
 
-        setup_buffer(gl.clone(), program.clone(), "a_position", 2, &[
+        Self::setup_buffer(gl.clone(), program.clone(), "a_position", 2, &[
             // (hypothetically we could use indexing to cut this down to just /four/ vertices
             // worth of data... but right now i just dont feel like it)
             -60.0, 60.0, // top left
@@ -91,7 +90,7 @@ impl Renderer {
             60.0, 60.0, // top right
         ]).unwrap();
 
-        setup_buffer(gl.clone(), program.clone(), "a_uv", 2, &[
+        Self::setup_buffer(gl.clone(), program.clone(), "a_uv", 2, &[
             0.0, 1.0, // top left
             0.0, 0.0, // bottom left
             1.0, 0.0, // bottom right
@@ -117,78 +116,170 @@ impl Renderer {
             u_canvas_size,
         }
     }
+
+    fn compile_shader(gl: &GL, shader_type: u32, source: &str) -> Result<WebGlShader, String> {
+        let shader = gl
+            .create_shader(shader_type)
+            .ok_or_else(|| String::from("Unable to create shader object"))?;
+        gl.shader_source(&shader, source);
+        gl.compile_shader(&shader);
+
+        if !gl
+            .get_shader_parameter(&shader, GL::COMPILE_STATUS)
+            .as_bool()
+            .unwrap_or(false)
+        {
+            Err(gl
+                .get_shader_info_log(&shader)
+                .unwrap_or_else(|| String::from("Unknown error creating shader")))
+        } else {
+            Ok(shader)
+        }
+    }
+
+    fn link_program(
+        gl: &GL,
+        vert_shader: &WebGlShader,
+        frag_shader: &WebGlShader,
+    ) -> Result<WebGlProgram, String> {
+        let program = gl
+            .create_program()
+            .ok_or_else(|| String::from("Unable to create shader object"))?;
+
+        gl.attach_shader(&program, vert_shader);
+        gl.attach_shader(&program, frag_shader);
+        gl.link_program(&program);
+
+        if !gl
+            .get_program_parameter(&program, GL::LINK_STATUS)
+            .as_bool()
+            .unwrap_or(false)
+        {
+            Err(gl
+                .get_program_info_log(&program)
+                .unwrap_or_else(|| String::from("Unknown error creating program object")))
+        } else {
+            Ok(program)
+        }
+    }
+
+    // helper for setting up buffers and attributes
+    fn setup_buffer(
+        gl: Rc<GL>,
+        program: Rc<WebGlProgram>,
+        attrib: &str,
+        size: i32,
+        data: &[f32],
+    ) -> Result<(), JsValue> {
+        // Create and bind
+        let buffer = gl.create_buffer().unwrap();
+        gl.bind_buffer(GL::ARRAY_BUFFER, Some(&buffer));
+
+        // Upload
+        unsafe {
+            let array = js_sys::Float32Array::view(data); // memory danger
+            gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &array, GL::STATIC_DRAW);
+        }
+
+        // Attribute thingies
+        let attrib = gl.get_attrib_location(&program, attrib) as u32;
+        gl.vertex_attrib_pointer_with_i32(attrib, size, GL::FLOAT, false, 0, 0);
+        gl.enable_vertex_attrib_array(attrib);
+
+        // Unbind
+        gl.bind_buffer(GL::ARRAY_BUFFER, None);
+
+        Ok(())
+    }
 }
 
-struct Controls {
-    up: bool,
-    down: bool,
-    left: bool,
-    right: bool,
-    accelerate_mode: bool,
+struct Keyboard {
+    keys_down: Rc<RefCell<HashSet<Key>>>
 }
 
-impl Controls {
-    fn new() -> Self {
-        Self {
-            up: false,
-            down: false,
-            left: false,
-            right: false,
-            accelerate_mode: false,
+impl Keyboard {
+    fn new(window: &Window) -> Self {
+        let keys_down = Rc::new(RefCell::new(HashSet::new()));
+        Self::add_key_down_listener(window, keys_down.clone());
+        Self::add_key_up_listener(window, keys_down.clone());
+        Self { keys_down }
+    }
+
+    fn is_down(&self, key: Key) -> bool {
+        self.keys_down.as_ref().borrow_mut().contains(&key)
+    }
+
+    fn add_key_down_listener(window: &Window, keys_down: Rc<RefCell<HashSet<Key>>>) {
+        // Set up the listener as a JS &Function
+        let listener = move |e: web_sys::KeyboardEvent| {
+            if let Some(key) = Key::from(&e.key()) {
+                keys_down.as_ref().borrow_mut().insert(key); // This key was pressed down; add to the set.
+            }
+        };
+
+        let listener = Closure::<dyn FnMut(_)>::new(listener);
+
+        // "Register" the listener
+        window.add_event_listener_with_callback("keydown", listener.as_ref().unchecked_ref()).unwrap();
+        listener.forget();
+    }
+
+    fn add_key_up_listener(window: &Window, keys_down: Rc<RefCell<HashSet<Key>>>) {
+        // Set up the listener as a JS &Function
+        let listener = move |e: web_sys::KeyboardEvent| {
+            if let Some(key) = Key::from(&e.key()) {
+                keys_down.as_ref().borrow_mut().remove(&key); // This key was released; remove from the set.
+            }
+        };
+
+        let listener = Closure::<dyn FnMut(_)>::new(listener);
+
+        // "Register" the listener
+        window.add_event_listener_with_callback("keyup", listener.as_ref().unchecked_ref()).unwrap();
+        listener.forget();
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+enum Key {
+    Up,
+    Down,
+    Left,
+    Right,
+    Turbo,
+}
+
+impl Key {
+    fn from(str: &str) -> Option<Key> {
+        match str {
+            "ArrowUp" => Some(Key::Up),
+            "ArrowDown" => Some(Key::Down),
+            "ArrowLeft" => Some(Key::Left),
+            "ArrowRight" => Some(Key::Right),
+            "Shift" => Some(Key::Turbo),
+            _ => None
         }
     }
 }
 
 struct Scene {
-    controls: Rc<RefCell<Controls>>,
+    keyboard: Keyboard,
     time: f32,
+    player_center: (f32, f32),
     player: (f32, f32),
+    speed: f32,
 }
 
 impl Scene {
     fn new(window: &Window) -> Self {
-        let controls = Rc::new(RefCell::new(Controls::new()));
-
-        // (sobbing on my hands and knees)
-        // (it's terrible... but it works!)
-        let a = Closure::<dyn FnMut(_)>::new({
-            let controls = controls.clone();
-            move |event: web_sys::KeyboardEvent| {
-                let mut controls = controls.as_ref().borrow_mut();
-                match event.key().as_str() {
-                    "ArrowUp" => { controls.up = true },
-                    "ArrowDown" => { controls.down = true },
-                    "ArrowLeft" => { controls.left = true },
-                    "ArrowRight" => { controls.right = true },
-                    _ => {}
-                }
-            }
-        });
-        window.add_event_listener_with_callback("keydown", a.as_ref().unchecked_ref()).unwrap();
-        a.forget();
-
-        let a = Closure::<dyn FnMut(_)>::new({
-            let controls = controls.clone();
-            move |event: web_sys::KeyboardEvent| {
-                let mut controls = controls.as_ref().borrow_mut();
-                match event.key().as_str() {
-                    "ArrowUp" => { controls.up = false },
-                    "ArrowDown" => { controls.down = false },
-                    "ArrowLeft" => { controls.left = false },
-                    "ArrowRight" => { controls.right = false },
-                    _ => {}
-                }
-            }
-        });
-        window.add_event_listener_with_callback("keyup", a.as_ref().unchecked_ref()).unwrap();
-        a.forget();
-
-        // todo: window on lose focus (make all controls false)
+        let keyboard = Keyboard::new(window);
 
         Self {
-            controls,
+            keyboard,
             time: 0.0,
+            player_center: (0.0, 0.0),
             player: (0.0, 0.0),
+            speed: 5.0
         }
     }
 }
@@ -232,16 +323,34 @@ impl Client {
     #[no_mangle]
     pub fn update(&mut self, mut dt: f32) {
         let scene = &mut self.scene;
+        let keyboard = &scene.keyboard;
 
-        if scene.controls.as_ref().borrow().up { dt *= 2.0; }
-        if scene.controls.as_ref().borrow().down { dt *= 0.5; }
+        // Speed Controls
+        let player_center = &mut scene.player_center;
+        if keyboard.is_down(Key::Turbo) { // Accelerate
+            scene.speed += 2.0;
+        } else {
+            scene.speed = 5.0;
+        }
+        if keyboard.is_down(Key::Right) { player_center.0 += scene.speed; }
+        if keyboard.is_down(Key::Left) { player_center.0 += -scene.speed; }
+
+        // Wiggle Mechanics
+        if keyboard.is_down(Key::Up) { dt *= 2.0; }
+        if keyboard.is_down(Key::Down) { dt *= 0.5; }
         scene.time += dt;
 
         let i = (scene.time * 0.001).cos() * 4.0 + 2.0; // intensity
-        scene.player = (
+        let offset = (
             i * (scene.time * 0.006).cos() * 12.0,
             i * (scene.time * 0.01).sin() * 12.0
         );
+
+        // Final Player Position
+        scene.player = (
+            player_center.0 + offset.0,
+            player_center.1 + offset.1,
+        )
     }
 
     // called once every `requestAnimationFrame`
@@ -285,79 +394,4 @@ impl Client {
         gl.bind_texture(GL::TEXTURE_2D, None);
         gl.use_program(None);
     }
-}
-
-fn compile_shader(gl: &GL, shader_type: u32, source: &str) -> Result<WebGlShader, String> {
-    let shader = gl
-        .create_shader(shader_type)
-        .ok_or_else(|| String::from("Unable to create shader object"))?;
-    gl.shader_source(&shader, source);
-    gl.compile_shader(&shader);
-
-    if !gl
-        .get_shader_parameter(&shader, GL::COMPILE_STATUS)
-        .as_bool()
-        .unwrap_or(false)
-    {
-        Err(gl
-            .get_shader_info_log(&shader)
-            .unwrap_or_else(|| String::from("Unknown error creating shader")))
-    } else {
-        Ok(shader)
-    }
-}
-
-fn link_program(
-    gl: &GL,
-    vert_shader: &WebGlShader,
-    frag_shader: &WebGlShader,
-) -> Result<WebGlProgram, String> {
-    let program = gl
-        .create_program()
-        .ok_or_else(|| String::from("Unable to create shader object"))?;
-
-    gl.attach_shader(&program, vert_shader);
-    gl.attach_shader(&program, frag_shader);
-    gl.link_program(&program);
-
-    if !gl
-        .get_program_parameter(&program, GL::LINK_STATUS)
-        .as_bool()
-        .unwrap_or(false)
-    {
-        Err(gl
-            .get_program_info_log(&program)
-            .unwrap_or_else(|| String::from("Unknown error creating program object")))
-    } else {
-        Ok(program)
-    }
-}
-
-// helper for setting up buffers and attributes
-fn setup_buffer(
-    gl: Rc<GL>,
-    program: Rc<WebGlProgram>,
-    attrib: &str,
-    size: i32,
-    data: &[f32],
-) -> Result<(), JsValue> {
-    // Create and bind
-    let buffer = gl.create_buffer().unwrap();
-    gl.bind_buffer(GL::ARRAY_BUFFER, Some(&buffer));
-
-    // Upload
-    unsafe {
-        let array = js_sys::Float32Array::view(data); // memory danger
-        gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &array, GL::STATIC_DRAW);
-    }
-
-    // Attribute thingies
-    let attrib = gl.get_attrib_location(&program, attrib) as u32;
-    gl.vertex_attrib_pointer_with_i32(attrib, size, GL::FLOAT, false, 0, 0);
-    gl.enable_vertex_attrib_array(attrib);
-
-    // Unbind
-    gl.bind_buffer(GL::ARRAY_BUFFER, None);
-
-    Ok(())
 }
