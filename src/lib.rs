@@ -1,3 +1,6 @@
+use std::ops::Add;
+use std::ops::Mul;
+
 use renderer::Renderer;
 use scene::Scene;
 use wasm_bindgen::prelude::*;
@@ -19,6 +22,47 @@ pub struct Client {
 
     renderer: Renderer, // Holds GL related state
     scene: Scene, // Holds scene state
+}
+
+struct Vec2 {
+    x: f32,
+    y: f32,
+}
+
+impl Add for Vec2 {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Vec2 {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+        }
+    }
+}
+
+impl Mul<f32> for Vec2 {
+    type Output = Self;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        Vec2 {
+            x: self.x * rhs,
+            y: self.y * rhs,
+        }
+    }
+}
+
+fn corner_vertices(t: Vec2, u: Vec2, v: Vec2, width: f32) {
+    let d = normalize(length(&t) * v + length(&v) * t);
+}
+
+fn normalize(v: &Vec2) -> Vec2 {
+    let length = length(v);
+    v * 1.0/length
+}
+
+fn length(v: &Vec2) -> f32 {
+    let magnitude = v.0 * v.0 + v.1 * v.1;
+    magnitude.sqrt()
 }
 
 #[wasm_bindgen]

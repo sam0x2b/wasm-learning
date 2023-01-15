@@ -11,6 +11,7 @@ pub struct Renderer {
     pub vertex_count: i32,
 
     pub program: Rc<WebGlProgram>, // keeping it here for now, later it will be attached to a draw list
+    pub line_program: Rc<WebGlProgram>,
     pub u_displacement: WebGlUniformLocation,
     pub u_canvas_size: WebGlUniformLocation,
 }
@@ -99,6 +100,31 @@ impl Renderer {
         gl.bind_texture(GL::TEXTURE_2D, None);
         gl.use_program(None);
 
+
+        // Line program
+        let vert_shader = Self::compile_shader(&gl, GL::VERTEX_SHADER, include_str!("./line.vert")).unwrap();
+        let frag_shader = Self::compile_shader(&gl, GL::FRAGMENT_SHADER, include_str!("./line.frag")).unwrap();
+        let line_program = Self::link_program(&gl, &vert_shader, &frag_shader).unwrap();
+        let line_program = Rc::new(line_program);
+
+
+        let line = [
+            1.0, 1.0,
+            2.0, -1.0,
+            3.0, 2.0,
+            4.0, -2.0,
+            5.0, 3.0,
+        ];
+
+        let buffer = gl.create_buffer().unwrap();
+        gl.bind_buffer(GL::ELEMENT_ARRAY_BUFFER, Some(&buffer));
+        unsafe {
+            let array = js_sys::Float32Array::view(&[
+                1.0, 2.02
+            ]); // memory danger
+            gl.buffer_data_with_array_buffer_view(GL::ELEMENT_ARRAY_BUFFER, &array, GL::STATIC_DRAW);
+        }
+
         Renderer {
             gl,
 
@@ -109,6 +135,8 @@ impl Renderer {
             program,
             u_displacement,
             u_canvas_size,
+
+            line_program,
         }
     }
 
@@ -166,7 +194,7 @@ impl Renderer {
         size: i32,
         data: &[f32],
     ) -> Result<(), JsValue> {
-        // Create and bind
+        // Create, bind
         let buffer = gl.create_buffer().unwrap();
         gl.bind_buffer(GL::ARRAY_BUFFER, Some(&buffer));
 
