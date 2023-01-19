@@ -95,22 +95,27 @@ impl Client {
         let keyboard = &self.keyboard;
 
         // controls
-        if keyboard.is_down(Key::Left) {
-            player.velocity.x = -5.0;
-        }
-        if keyboard.is_down(Key::Right) {
-            player.velocity.x = 5.0;
-        }
-        if keyboard.is_down(Key::Up) && player.can_jump {
-            player.can_jump = false;
-            player.velocity.y = 15.0;
+        const SPEED: f32 = 15.0;
+
+        let mut d_velocity_x = 0.0;
+        if keyboard.is_down(Key::Left) { d_velocity_x += -SPEED; }
+        if keyboard.is_down(Key::Right) { d_velocity_x += SPEED; }
+        player.velocity.x = d_velocity_x;
+
+        if keyboard.is_down(Key::Up) {
+            if player.can_jump {
+                player.can_jump = false;
+                player.velocity.y = 100.0;
+            }
+        } else {
+            player.can_jump = true;
         }
 
         // gravity
-        player.velocity.y -= 9.8 * dt;
+        player.velocity.y -= 3.0;
 
         // update position based on velocity
-        player.position += player.velocity * dt;
+        player.position += player.velocity * (dt / 60.0);
     }
 
     // called once every `requestAnimationFrame`
@@ -126,13 +131,20 @@ impl Client {
         let client_size = (c.client_width(), c.client_height());
 
         if size != client_size {
-            c.set_height(c.client_height() as u32);
-            c.set_width(c.client_width() as u32);
+            // let test = (c.client_width(), c.client_height());
+            // web_sys::console::log_1(&format!("size: {:#?}\nclient_size: {:#?}\ntest: {:#?}",
+            //     size,
+            //     client_size,
+            //     test
+            // ).into());
 
-            gl.viewport(0, 0, c.client_width(), c.client_height());
+            c.set_width(client_size.0 as u32);
+            c.set_height(client_size.1 as u32);
+
+            gl.viewport(0, 0, client_size.0, client_size.1);
 
             gl.use_program(Some(&renderer.program));
-            gl.uniform2f(Some(&renderer.u_canvas_size), c.client_width() as f32, c.client_height() as f32);
+            gl.uniform2f(Some(&renderer.u_canvas_size), client_size.0 as f32, client_size.1 as f32);
             gl.use_program(None);
         }
 
