@@ -1,68 +1,67 @@
-use std::ops::Add;
-use std::ops::Mul;
+mod keyboard;
+mod renderer;
+mod vec2;
 
+use keyboard::Key;
+use keyboard::Keyboard;
 use renderer::Renderer;
-use scene::Scene;
+use vec2::Vec2;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 // use web_sys::{ Document, Window };
 use web_sys::HtmlCanvasElement;
 use web_sys::WebGl2RenderingContext as GL;
 
-use crate::keyboard::Key;
+struct Sprite {
+    position: Vec2,
+    velocity: Vec2,
+}
 
-mod scene;
-mod keyboard;
-mod renderer;
+impl Sprite {
+    fn new() -> Self {
+        Self {
+            position: Vec2::new(0.0, 0.0),
+            velocity: Vec2::new(0.0, 0.0),
+        }
+    }
+}
+
+struct Player {
+    can_jump: bool,
+    position: Vec2, // similar to sprite. theres probably a better way to do this, but i'll think about it later
+    velocity: Vec2,
+}
+
+impl Player {
+    fn new() -> Self {
+        Self {
+            can_jump: true,
+            position: Vec2::new(0.0, 0.0),
+            velocity: Vec2::new(0.0, 0.0),
+        }
+    }
+}
+
+struct Scene {
+    player: Player
+}
+
+impl Scene {
+    fn new() -> Self {
+        Self {
+            player: Player::new()
+        }
+    }
+}
 
 #[wasm_bindgen]
 pub struct Client {
     // window: Window,
     canvas: HtmlCanvasElement,
+    keyboard: Keyboard,
 
     renderer: Renderer, // Holds GL related state
-    scene: Scene, // Holds scene state
-}
-
-struct Vec2 {
-    x: f32,
-    y: f32,
-}
-
-impl Add for Vec2 {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Vec2 {
-            x: self.x + rhs.x,
-            y: self.y + rhs.y,
-        }
-    }
-}
-
-impl Mul<f32> for Vec2 {
-    type Output = Self;
-
-    fn mul(self, rhs: f32) -> Self::Output {
-        Vec2 {
-            x: self.x * rhs,
-            y: self.y * rhs,
-        }
-    }
-}
-
-fn corner_vertices(t: Vec2, u: Vec2, v: Vec2, width: f32) {
-    let d = normalize(length(&t) * v + length(&v) * t);
-}
-
-fn normalize(v: &Vec2) -> Vec2 {
-    let length = length(v);
-    v * 1.0/length
-}
-
-fn length(v: &Vec2) -> f32 {
-    let magnitude = v.0 * v.0 + v.1 * v.1;
-    magnitude.sqrt()
+    scene: Scene
 }
 
 #[wasm_bindgen]
@@ -82,8 +81,8 @@ impl Client {
 
         Self {
             renderer: Renderer::new(&canvas),
-            scene: Scene::new(&window),
-
+            scene: Scene::new(),
+            keyboard: Keyboard::new(&window),
             // window,
             canvas,
         }
@@ -91,42 +90,34 @@ impl Client {
 
     // called once every `requestAnimationFrame`
     #[no_mangle]
-    pub fn update(&mut self, mut dt: f32) {
-        let scene = &mut self.scene;
-        let keyboard = &scene.keyboard;
+    pub fn update(&mut self, dt: f32) {
+        let player = &mut self.scene.player;
+        let keyboard = &self.keyboard;
 
-        // Speed Controls
-        let player_center = &mut scene.player_center;
-        if keyboard.is_down(Key::Turbo) { // Accelerate
-            scene.speed += 2.0;
-        } else {
-            scene.speed = 5.0;
+        // controls
+        if keyboard.is_down(Key::Left) {
+            player.velocity.x = -5.0;
         }
-        if keyboard.is_down(Key::Right) { player_center.0 += scene.speed; }
-        if keyboard.is_down(Key::Left) { player_center.0 += -scene.speed; }
+        if keyboard.is_down(Key::Right) {
+            player.velocity.x = 5.0;
+        }
+        if keyboard.is_down(Key::Up) && player.can_jump {
+            player.can_jump = false;
+            player.velocity.y = 15.0;
+        }
 
-        // Wiggle Mechanics
-        if keyboard.is_down(Key::Up) { dt *= 2.0; }
-        if keyboard.is_down(Key::Down) { dt *= 0.5; }
-        scene.time += dt;
+        // gravity
+        player.velocity.y -= 9.8 * dt;
 
-        let i = (scene.time * 0.001).cos() * 4.0 + 2.0; // intensity
-        let offset = (
-            i * (scene.time * 0.006).cos() * 12.0,
-            i * (scene.time * 0.01).sin() * 12.0
-        );
-
-        // Final Player Position
-        scene.player = (
-            player_center.0 + offset.0,
-            player_center.1 + offset.1,
-        )
+        // update position based on velocity
+        player.position += player.velocity * dt;
     }
 
     // called once every `requestAnimationFrame`
     #[no_mangle]
     pub fn render(&mut self) {
         let renderer = &self.renderer;
+        let scene = &self.scene;
         let gl = &renderer.gl;
 
         // Check canvas size.
@@ -147,8 +138,7 @@ impl Client {
 
         // Update uniforms
         gl.use_program(Some(&renderer.program));
-        let scene = &self.scene;
-        gl.uniform2f(Some(&renderer.u_displacement), scene.player.0, scene.player.1);
+        gl.uniform2f(Some(&renderer.u_displacement), scene.player.position.x, scene.player.position.y);
 
         // Bind
         gl.bind_texture(GL::TEXTURE_2D, Some(&renderer.texture));
